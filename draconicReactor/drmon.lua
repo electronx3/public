@@ -2,10 +2,10 @@
 local reactorSide = "back"
 local fluxgateSide = "right"
  
-local targetStrength = 20
+local targetStrength = 16
 local maxTemperature = 8300
 local safeTemperature = 7900
-local lowestFieldPercent = 10
+local lowestFieldPercent = 7
  
 local activateOnCharged = 1
  
@@ -108,6 +108,9 @@ function buttons()
       elseif xPos >= 25 and xPos <= 27 then
         cFlow = cFlow+1000
       end
+      if (cFlow < 0) then
+        cFlow = 0
+      end
       fluxgate.setSignalLowFlow(cFlow)
     end
  
@@ -127,6 +130,9 @@ function buttons()
         curInputGate = curInputGate+10000
       elseif xPos >= 25 and xPos <= 27 then
         curInputGate = curInputGate+1000
+      end
+      if (curInputGate < 0) then
+        curInputGate = 0
       end
       inputfluxgate.setSignalLowFlow(curInputGate)
       save_config()
@@ -199,7 +205,7 @@ function update()
  
     local tempColor = colors.red
     if ri.temperature <= 7500 then tempColor = colors.green end
-    if ri.temperature >= 7500 and ri.temperature <= 7990 then tempColor = colors.orange end
+    if ri.temperature >= 7500 and ri.temperature <= 7800 then tempColor = colors.orange end
     f.draw_text_lr(mon, 2, 6, 1, "Temperature", f.format_int(ri.temperature) .. "C", colors.white, tempColor, colors.black)
  
     f.draw_text_lr(mon, 2, 7, 1, "Output Gate", f.format_int(fluxgate.getSignalLowFlow()) .. " rf/t", colors.white, colors.blue, colors.black)
@@ -225,7 +231,7 @@ function update()
     if satPercent >= 50 then satPercent = colors.green end
     if satPercent < 50 and satPercent > 15 then fuelColor = colors.orange end
  
-    f.progress_bar(mon, 2, 12, mon.X-2, satPercent, 100, colors.blue, colors.gray)
+    f.progress_bar(mon, 2, 12, mon.X-2, satPercent, 100, satColor, colors.gray)
  
     local fieldPercent, fieldColor
     fieldPercent = math.ceil(ri.fieldStrength / ri.maxFieldStrength * 10000)*.01
