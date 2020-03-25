@@ -3,7 +3,7 @@ local reactorSide = "back"
 local fluxgateSide = "right"
  
 local targetStrength = 20
-local maxTemperature = 8000
+local maxTemperature = 8300
 local safeTemperature = 7900
 local lowestFieldPercent = 10
  
