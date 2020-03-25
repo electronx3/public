@@ -198,8 +198,8 @@ function update()
     f.draw_text_lr(mon, 2, 4, 1, "Generation", f.format_int(ri.generationRate) .. " rf/t", colors.white, colors.lime, colors.black)
  
     local tempColor = colors.red
-    if ri.temperature <= 5000 then tempColor = colors.green end
-    if ri.temperature >= 5000 and ri.temperature <= 6500 then tempColor = colors.orange end
+    if ri.temperature <= 7500 then tempColor = colors.green end
+    if ri.temperature >= 7500 and ri.temperature <= 7990 then tempColor = colors.orange end
     f.draw_text_lr(mon, 2, 6, 1, "Temperature", f.format_int(ri.temperature) .. "C", colors.white, tempColor, colors.black)
  
     f.draw_text_lr(mon, 2, 7, 1, "Output Gate", f.format_int(fluxgate.getSignalLowFlow()) .. " rf/t", colors.white, colors.blue, colors.black)
@@ -221,7 +221,7 @@ function update()
  
     f.draw_text_lr(mon, 2, 11, 1, "Energy Saturation", satPercent .. "%", colors.white, colors.white, colors.black)
  
-    local satColor = color.red
+    local satColor = colors.red
     if satPercent >= 50 then satPercent = colors.green end
     if satPercent < 50 and satPercent > 15 then fuelColor = colors.orange end
  
