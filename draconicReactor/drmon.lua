@@ -1,327 +1,327 @@
--- modifiable variables
-local reactorSide = "back"
-local fluxgateSide = "right"
- 
-local targetStrength = 16
-local maxTemperature = 8300
-local safeTemperature = 7900
-local lowestFieldPercent = 7
- 
-local activateOnCharged = 1
- 
--- please leave things untouched from here on
-os.loadAPI("lib/f")
- 
-local version = "0.25"
--- toggleable via the monitor, use our algorithm to achieve our target field strength or let the user tweak it
-local autoInputGate = 1
-local curInputGate = 222000
- 
--- monitor
-local mon, monitor, monX, monY
- 
--- peripherals
+--peripherals
+local sideGateOutput = "right"
+local sideReactor = "back"
+
+local preferredFieldStrength = 0.01
+local preferredFieldStrengthLaunching = 0.1
+local preferredFieldStrengthStopping = 0.1
+
+local preferredInflowCharging = -1
+
+
+--Do not change code below
+
+local version = "1.0.1"
+
+--shutdown parameters
+local shutdownTemperature = 8005.0
+local shutdownFieldStrength = 0.007
+local shutdownFuelConversion = 0.9
+
+--other
+local preferredTemperature = 8000.0
+local fastLaunchOffsetTemperature = 7500.0
+local fastLaunchOffsetTemperature2 = 7800.0
+local fastLaunchOffsetTemperature3 = 7984.0
+
+local preferredInflowStarting = 200000
+local preferredOutflowLaunching = 1000000
+
+--program variables
+
+local doUpdate = true
+local initiateStatusChange = "no"
+
+--peripherals
 local reactor
-local fluxgate
-local inputfluxgate
- 
--- reactor information
-local ri
- 
--- last performed action
-local action = "None since reboot"
-local emergencyCharge = false
-local emergencyTemp = false
- 
-monitor = f.periphSearch("monitor")
-inputfluxgate = f.periphSearch("flux_gate")
-fluxgate = peripheral.wrap(fluxgateSide)
-reactor = peripheral.wrap(reactorSide)
- 
-if monitor == null then
-    error("No valid monitor was found")
-end
- 
-if fluxgate == null then
-    error("No valid fluxgate was found")
-end
- 
-if reactor == null then
-    error("No valid reactor was found")
-end
- 
-if inputfluxgate == null then
-    error("No valid flux gate was found")
-end
- 
-monX, monY = monitor.getSize()
-mon = {}
-mon.monitor,mon.X, mon.Y = monitor, monX, monY
- 
---write settings to config file
-function save_config()
-  sw = fs.open("config.txt", "w")  
-  sw.writeLine(version)
-  sw.writeLine(autoInputGate)
-  sw.writeLine(curInputGate)
-  sw.close()
-end
- 
---read settings from file
-function load_config()
-  sr = fs.open("config.txt", "r")
-  version = sr.readLine()
-  autoInputGate = tonumber(sr.readLine())
-  curInputGate = tonumber(sr.readLine())
-  sr.close()
-end
- 
- 
--- 1st time? save our settings, if not, load our settings
-if fs.exists("config.txt") == false then
-  save_config()
-else
-  load_config()
-end
- 
-function buttons()
- 
-  while true do
-    -- button handler
-    event, side, xPos, yPos = os.pullEvent("monitor_touch")
- 
-    -- output gate controls
-    -- 2-4 = -1000, 6-9 = -10000, 10-12,8 = -100000
-    -- 17-19 = +1000, 21-23 = +10000, 25-27 = +100000
-    if yPos == 8 then
-      local cFlow = fluxgate.getSignalLowFlow()
-      if xPos >= 2 and xPos <= 4 then
-        cFlow = cFlow-1000
-      elseif xPos >= 6 and xPos <= 9 then
-        cFlow = cFlow-10000
-      elseif xPos >= 10 and xPos <= 12 then
-        cFlow = cFlow-100000
-      elseif xPos >= 17 and xPos <= 19 then
-        cFlow = cFlow+100000
-      elseif xPos >= 21 and xPos <= 23 then
-        cFlow = cFlow+10000
-      elseif xPos >= 25 and xPos <= 27 then
-        cFlow = cFlow+1000
-      end
-      if (cFlow < 0) then
-        cFlow = 0
-      end
-      fluxgate.setSignalLowFlow(cFlow)
+local gateInput
+local gateOutput
+
+--reactor info
+
+--max values
+local maxFieldStrength
+local maxEnergySaturation
+local maxFuelConversion
+
+--current values
+local currentReactorStatus
+local currentTemperature
+local currentFieldStrengthRaw
+local currentFieldStrength
+local currentFieldDrainRate
+local currentEnergySaturationRaw
+local currentEnergySaturation
+local currentFuelConversionRaw
+local currentFuelConversion
+local currentFuelConversionRate
+local currentGenerationRate
+
+local currentTicksSinceStatusChange
+local currentInflow
+local currentOutflow
+local currentNettoGeneration
+
+--last values
+local lastReactorStatus
+local lastTemperature
+local lastFieldStrengthRaw
+local lastFieldStrength
+local lastFieldDrainRate
+local lastEnergySaturationRaw
+local lastEnergySaturation
+local lastFuelConversionRaw
+local lastFuelConversion
+local lastFuelConversionRate
+local lastGenerationRate
+
+--other values
+local infoHighestTemperature = 0.0
+local infoLowestFieldStrength = 1.0
+local infoLowestSaturation = 1.0
+
+--read reactor info
+function updateReactorInfo()
+	local reactorInfo = reactor.getReactorInfo()
+	
+	if reactorInfo == nil then
+      error("Reactor has an invalid setup!")
     end
- 
-    -- input gate controls
-    -- 2-4 = -1000, 6-9 = -10000, 10-12,8 = -100000
-    -- 17-19 = +1000, 21-23 = +10000, 25-27 = +100000
-    if yPos == 10 and autoInputGate == 0 and xPos ~= 14 and xPos ~= 15 then
-      if xPos >= 2 and xPos <= 4 then
-        curInputGate = curInputGate-1000
-      elseif xPos >= 6 and xPos <= 9 then
-        curInputGate = curInputGate-10000
-      elseif xPos >= 10 and xPos <= 12 then
-        curInputGate = curInputGate-100000
-      elseif xPos >= 17 and xPos <= 19 then
-        curInputGate = curInputGate+100000
-      elseif xPos >= 21 and xPos <= 23 then
-        curInputGate = curInputGate+10000
-      elseif xPos >= 25 and xPos <= 27 then
-        curInputGate = curInputGate+1000
-      end
-      if (curInputGate < 0) then
-        curInputGate = 0
-      end
-      inputfluxgate.setSignalLowFlow(curInputGate)
-      save_config()
-    end
- 
-    -- input gate toggle
-    if yPos == 10 and ( xPos == 14 or xPos == 15) then
-      if autoInputGate == 1 then
-        autoInputGate = 0
-      else
-        autoInputGate = 1
-      end
-      save_config()
-    end
- 
-  end
+	
+	lastReactorStatus 		= currentReactorStatus
+	lastTemperature 		= currentTemperature
+	lastFieldStrengthRaw 	= currentFieldStrengthRaw
+	lastFieldStrength 		= currentFieldStrength
+	lastFieldDrainRate 		= currentFieldDrainRate
+	lastEnergySaturationRaw = currentEnergySaturationRaw
+	lastEnergySaturation 	= currentEnergySaturation
+	lastFuelConversionRaw 	= currentFuelConversionRaw
+	lastFuelConversion 		= currentFuelConversion
+	lastFuelConversionRate 	= currentFuelConversionRate
+	lastGenerationRate 		= currentGenerationRate
+	
+	
+	maxFieldStrength 			= reactorInfo.maxFieldStrength
+	maxEnergySaturation 		= reactorInfo.maxEnergySaturation
+	maxFuelConversion 			= reactorInfo.maxFuelConversion
+	
+	currentTemperature 			= reactorInfo.temperature
+	currentFieldStrengthRaw 	= reactorInfo.fieldStrength
+	currentEnergySaturationRaw 	= reactorInfo.energySaturation
+	currentFuelConversionRaw 	= reactorInfo.fuelConversion
+	currentGenerationRate 		= reactorInfo.generationRate
+	currentFieldDrainRate 		= reactorInfo.fieldDrainRate
+	currentFuelConversionRate 	= reactorInfo.fuelConversionRate
+	currentReactorStatus 		= reactorInfo.status
+	
+	currentFieldStrength 		= 1.0 * currentFieldStrengthRaw / maxFieldStrength
+	currentEnergySaturation 	= 1.0 * currentEnergySaturationRaw / maxEnergySaturation
+	currentFuelConversion 		= 1.0 * currentFuelConversionRaw / maxFuelConversion
+	
+	
+	if currentReactorStatus ~= lastReactorStatus then
+		ticksSinceStatusChange = 0
+	else
+		ticksSinceStatusChange = ticksSinceStatusChange + 1
+	end
+	
+	currentInflow = gateInput.getFlow()
+	currentOutflow = gateOutput.getFlow()
+	currentNettoGeneration = currentGenerationRate - currentInflow
+	
+	if currentTemperature > infoHighestTemperature then
+		infoHighestTemperature = currentTemperature
+	end
+	if (status == "online" or status == "stopping") and (currentFieldStrength < infoLowestFieldStrength) then
+		infoLowestFieldStrength = currentFieldStrength
+	end
+	if (status == "online" or status == "stopping") and (currentEnergySaturation < infoLowestSaturation) then
+		infoLowestSaturation = currentEnergySaturation
+	end
 end
- 
-function drawButtons(y)
- 
-  -- 2-4 = -1000, 6-9 = -10000, 10-12,8 = -100000
-  -- 17-19 = +1000, 21-23 = +10000, 25-27 = +100000
- 
-  f.draw_text(mon, 2, y, " < ", colors.white, colors.gray)
-  f.draw_text(mon, 6, y, " <<", colors.white, colors.gray)
-  f.draw_text(mon, 10, y, "<<<", colors.white, colors.gray)
- 
-  f.draw_text(mon, 17, y, ">>>", colors.white, colors.gray)
-  f.draw_text(mon, 21, y, ">> ", colors.white, colors.gray)
-  f.draw_text(mon, 25, y, " > ", colors.white, colors.gray)
+
+function setup()
+	setupPeripherals()
+	
+	currentTicksSinceStatusChange = 0
+	
+	updateReactorInfo()
+	updateReactorInfo()
+
+	if preferredInflowCharging == -1 then
+		preferredInflowCharging = 10000000
+	end
 end
- 
- 
- 
+
+function setupPeripherals()
+	reactor = peripheral.wrap(sideReactor)
+	monitor = periphSearch("monitor")
+	gateInput = periphSearch("flux_gate")
+	gateOutput = peripheral.wrap(sideGateOutput)
+	
+	if reactor == null then
+		error("No valid reactor was found!")
+	end
+	if gateInput == null then
+		error("No valid input fluxgate was found!")
+	end	 
+	if gateOutput == null then
+		error("No valid output fluxgate was found!")
+	end
+	
+	gateInput.setOverrideEnabled(true)
+	gateOutput.setOverrideEnabled(true)
+end
+function periphSearch(type)
+   local names = peripheral.getNames()
+   local i, name
+   for i, name in pairs(names) do
+      if peripheral.getType(name) == type then
+         return peripheral.wrap(name)
+      end
+   end
+   return null
+end
+
 function update()
-  while true do
- 
-    f.clear(mon)
- 
-    ri = reactor.getReactorInfo()
- 
-    -- print out all the infos from .getReactorInfo() to term
- 
-    if ri == nil then
-      error("reactor has an invalid setup")
-    end
- 
-    for k, v in pairs (ri) do
-      print(k.. ": ".. v)
-    end
-    print("Output Gate: ", fluxgate.getSignalLowFlow())
-    print("Input Gate: ", inputfluxgate.getSignalLowFlow())
- 
-    -- monitor output
- 
-    local statusColor
-    statusColor = colors.red
- 
-    if ri.status == "online" or ri.status == "charged" then
-      statusColor = colors.green
-    elseif ri.status == "offline" then
-      statusColor = colors.gray
-    elseif ri.status == "charging" then
-      statusColor = colors.orange
-    end
- 
-    f.draw_text_lr(mon, 2, 2, 1, "Reactor Status", string.upper(ri.status), colors.white, statusColor, colors.black)
- 
-    f.draw_text_lr(mon, 2, 4, 1, "Generation", f.format_int(ri.generationRate) .. " rf/t", colors.white, colors.lime, colors.black)
- 
-    local tempColor = colors.red
-    if ri.temperature <= 7500 then tempColor = colors.green end
-    if ri.temperature >= 7500 and ri.temperature <= 7800 then tempColor = colors.orange end
-    f.draw_text_lr(mon, 2, 6, 1, "Temperature", f.format_int(ri.temperature) .. "C", colors.white, tempColor, colors.black)
- 
-    f.draw_text_lr(mon, 2, 7, 1, "Output Gate", f.format_int(fluxgate.getSignalLowFlow()) .. " rf/t", colors.white, colors.blue, colors.black)
- 
-    -- buttons
-    drawButtons(8)
- 
-    f.draw_text_lr(mon, 2, 9, 1, "Input Gate", f.format_int(inputfluxgate.getSignalLowFlow()) .. " rf/t", colors.white, colors.blue, colors.black)
- 
-    if autoInputGate == 1 then
-      f.draw_text(mon, 14, 10, "AU", colors.white, colors.gray)
-    else
-      f.draw_text(mon, 14, 10, "MA", colors.white, colors.gray)
-      drawButtons(10)
-    end
- 
-    local satPercent
-    satPercent = math.ceil(ri.energySaturation / ri.maxEnergySaturation * 10000)*.01
- 
-    f.draw_text_lr(mon, 2, 11, 1, "Energy Saturation", satPercent .. "%", colors.white, colors.white, colors.black)
- 
-    local satColor = colors.red
-    if satPercent >= 50 then satPercent = colors.green end
-    if satPercent < 50 and satPercent > 15 then fuelColor = colors.orange end
- 
-    f.progress_bar(mon, 2, 12, mon.X-2, satPercent, 100, satColor, colors.gray)
- 
-    local fieldPercent, fieldColor
-    fieldPercent = math.ceil(ri.fieldStrength / ri.maxFieldStrength * 10000)*.01
- 
-    fieldColor = colors.red
-    if fieldPercent >= 19 then fieldColor = colors.green end
-    if fieldPercent < 19 and fieldPercent > 15 then fieldColor = colors.orange end
- 
-    if autoInputGate == 1 then
-      f.draw_text_lr(mon, 2, 14, 1, "Field Strength T:" .. targetStrength, fieldPercent .. "%", colors.white, fieldColor, colors.black)
-    else
-      f.draw_text_lr(mon, 2, 14, 1, "Field Strength", fieldPercent .. "%", colors.white, fieldColor, colors.black)
-    end
-    f.progress_bar(mon, 2, 15, mon.X-2, fieldPercent, 100, fieldColor, colors.gray)
- 
-    local fuelPercent, fuelColor
- 
-    fuelPercent = 100 - math.ceil(ri.fuelConversion / ri.maxFuelConversion * 10000)*.01
- 
-    fuelColor = colors.red
- 
-    if fuelPercent >= 70 then fuelColor = colors.green end
-    if fuelPercent < 70 and fuelPercent > 30 then fuelColor = colors.orange end
- 
-    f.draw_text_lr(mon, 2, 17, 1, "Fuel ", fuelPercent .. "%", colors.white, fuelColor, colors.black)
-    f.progress_bar(mon, 2, 18, mon.X-2, fuelPercent, 100, fuelColor, colors.gray)
- 
-    f.draw_text_lr(mon, 2, 19, 1, "Action ", action, colors.gray, colors.gray, colors.black)
- 
-    -- actual reactor interaction
-    --
-    if emergencyCharge == true then
-      reactor.chargeReactor()
-    end
-   
-    -- are we charging? open the floodgates
-    if ri.status == "charging" then
-      inputfluxgate.setSignalLowFlow(900000)
-      emergencyCharge = false
-    end
- 
-    -- are we stopping from a shutdown and our temp is better? activate
-    if emergencyTemp == true and ri.status == "stopping" and ri.temperature < safeTemperature then
-      reactor.activateReactor()
-      emergencyTemp = false
-    end
- 
-    -- are we charged? lets activate
-    if ri.status == "charged" and activateOnCharged == 1 then
-      reactor.activateReactor()
-    end
- 
-    -- are we on? regulate the input fluxgate to our target field strength
-    -- or set it to our saved setting since we are on manual
-    if ri.status == "online" then
-      if autoInputGate == 1 then
-        fluxval = ri.fieldDrainRate / (1 - (targetStrength/100) )
-        print("Target Gate: ".. fluxval)
-        inputfluxgate.setSignalLowFlow(fluxval)
-      else
-        inputfluxgate.setSignalLowFlow(curInputGate)
-      end
-    end
- 
-    -- safeguards
-    --
-   
-    -- out of fuel, kill it
-    if fuelPercent <= 10 then
-      reactor.stopReactor()
-      action = "Fuel below 10%, refuel"
-    end
- 
-    -- field strength is too dangerous, kill and it try and charge it before it blows
-    if fieldPercent <= lowestFieldPercent and ri.status == "online" then
-      action = "Field Str < " ..lowestFieldPercent.."%"
-      reactor.stopReactor()
-      reactor.chargeReactor()
-      emergencyCharge = true
-    end
- 
-    -- temperature too high, kill it and activate it when its cool
-    if ri.temperature > maxTemperature then
-      reactor.stopReactor()
-      action = "Temp > " .. maxTemperature
-      emergencyTemp = true
-    end
- 
-    sleep(0.1)
-  end
+	doUpdate = true
+	
+	local newInflow
+	local newOutflow
+	local isStable
+	
+	while doUpdate do
+		updateReactorInfo()		
+		
+		newInflow = currentInflow
+		newOutflow = 0
+		isStable = false
+		
+		if currentReactorStatus == "offline" then
+			newInflow = 0
+		elseif currentReactorStatus == "charging" then
+			newInflow = preferredInflowCharging
+		elseif currentReactorStatus == "charged" then
+			newInflow = preferredInflowStarting
+			newOutflow = preferredOutflowLaunching
+			reactor.activateReactor()
+		elseif currentReactorStatus == "online" then
+			if currentTemperature < (fastLaunchOffsetTemperature + 2000) / 2 then
+				newOutflow = preferredOutflowLaunching*1.2
+			elseif currentTemperature < fastLaunchOffsetTemperature then
+				newOutflow = preferredOutflowLaunching*0.99
+			elseif currentTemperature < fastLaunchOffsetTemperature2 then
+				newOutflow = currentGenerationRate + (preferredOutflowLaunching - currentGenerationRate)/10
+			elseif currentTemperature < fastLaunchOffsetTemperature3 then
+				newOutflow = currentGenerationRate + (preferredOutflowLaunching - currentGenerationRate)/20
+			elseif currentTemperature < preferredTemperature then
+				newOutflow = currentGenerationRate + 100
+			elseif currentTemperature < preferredTemperature + 0.1 then
+				newOutflow = currentGenerationRate - 1
+			elseif currentTemperature >= preferredTemperature + 0.1 then
+				newOutflow = currentGenerationRate - 100
+			end
+			
+			newInflow = calcInflow(preferredFieldStrengthLaunching)*1.1
+			
+			if (currentTemperature > preferredTemperature - 15) and (currentTemperature < preferredTemperature + 2) then
+				isStable = true
+				
+				if currentFieldStrength < preferredFieldStrength*0.99 then
+					newInflow = calcInflow(preferredFieldStrength)*1.1
+				elseif currentFieldStrength < preferredFieldStrength*0.999 then
+					newInflow = calcInflow(preferredFieldStrength)*1.001
+				elseif currentFieldStrength < preferredFieldStrength*1.5 then
+					newInflow = calcInflow(preferredFieldStrength)
+				else
+					newInflow = 0
+				end
+			elseif currentFieldStrength > preferredFieldStrengthLaunching*2 then
+				newInflow = 0
+			--else
+			--	newInflow = calcInflow(preferredFieldStrengthLaunching)*1.1
+			end			
+			
+			if isEmergency() then
+				reactor.stopReactor()
+				newInflow = calcInflowCorrected(preferredFieldStrengthStopping*2.0)
+				newOutflow = 0
+			elseif currentFuelConversion >= shutdownFuelConversion then
+				reactor.stopReactor()
+				newOutflow = 0
+			end
+		elseif currentReactorStatus == "stopping" then
+			if isEmergency() then
+				newInflow = calcInflowCorrected(preferredFieldStrengthStopping*2.0)
+			elseif currentFieldStrength < preferredFieldStrengthStopping*0.98 then
+				newInflow = calcInflow(preferredFieldStrengthStopping)*2
+			elseif currentFieldStrength < preferredFieldStrengthStopping*2.0 then
+				newInflow = calcInflow(preferredFieldStrengthStopping)
+			else
+				newInflow = 0
+			end
+		end
+				
+		
+		--newInflow = math.floor(newInflow)
+		--newOutflow = math.floor(newOutflow)
+		if newInflow < 0 then
+			newInflow = 0
+		end
+		if newOutflow < 0 then
+			newOutflow = 0
+		end		
+		gateInput.setFlowOverride(newInflow)
+		gateOutput.setFlowOverride(newOutflow)		
+				
+		
+		term.clear()
+		print("version: " .. version)
+		print("")
+		print("highest Temp: " .. infoHighestTemperature .. "K")
+		print("lowest field: " .. (math.floor(infoLowestFieldStrength*100000)/1000) .. "%")
+		print("lowest sat:   " .. (math.floor(infoLowestSaturation*100000)/1000) .. "%")
+		print("------------------------------------------")
+		print("temperature: " .. currentTemperature .. "K")
+		print("field:       " .. (math.floor(currentFieldStrength*10000)/100) .. "%")
+		print("saturation:  " .. (math.floor(currentEnergySaturation*10000)/100) .. "%")
+		print("inflow:      " .. currentInflow .. "RF/t")
+		if currentNettoGeneration > 0 then
+			print("netto:      +" .. currentNettoGeneration .. "RF/t")
+		else
+			print("netto:       " .. currentNettoGeneration .. "RF/t")
+		end
+		print("fuel left:   " .. (math.floor((1.0 - currentFuelConversion)*10000)/100) .. "%")
+		print("efficiency:  " .. currentFuelConversionRate .. "nb/t")
+		if isStable then
+			print("status:      " .. currentReactorStatus .. " (stable)")
+		else
+			print("status:      " .. currentReactorStatus)
+		end
+		
+		sleep(0.1)
+	end
 end
- 
-parallel.waitForAny(buttons, update)
+
+function calcInflowManual(targetStrength, fieldDrainRate)
+	return fieldDrainRate / (1.0 - targetStrength)
+end
+function calcInflow(targetStrength)
+	return calcInflowManual(targetStrength, currentFieldDrainRate)
+end
+function calcInflowCorrected(targetStrength)
+	return calcInflowManual(targetStrength, currentFieldDrainRate)*20 - calcInflowManual(lastFieldStrength, lastFieldDrainRate)*19
+end
+
+function isEmergency()
+	return currentTemperature >= shutdownTemperature or currentFieldStrength <= shutdownFieldStrength
+end
+
+--------------------------
+
+function main()
+	setup()
+	update()
+end
+
+main()
